@@ -38,8 +38,8 @@ We take a re-run of tract 9615 and look at the r-band deepCoadd forced src catal
 ![t9615p22rgc](t9615p22RGC.png)
 
 ## Tract 9615 Patch 4,4 RGB Zoom 3
-![t9615p44rsb](t9615p22RSB.png)
+![t9615p44rsb](t9615p44RSB.png)
 
 ## Tract 9615 Patch 4,4 RGB Zoom 3 Clumps
-![t9615p44rsc](t9615p22RSC.png)
+![t9615p44rsc](t9615p44RSC.png)
 
