@@ -4,7 +4,7 @@ import numpy as np
 from lsst import geom
 import time
 
-def extractBrightStarInfo(tractInfo, mask_path, radMaxPix=0, verbose=False):
+def extractBrightStarInfo(tractInfo, mask_path, radMaxPix=0, radInPix=True, verbose=False):
     """ Extract mask information from the ds9 region files. This is pretty hacky, but is
     only used for these specific masks - ultimately, it would be better to select the bright
     objects we look at from an external catalog (Gaia)."""
@@ -48,37 +48,43 @@ def extractBrightStarInfo(tractInfo, mask_path, radMaxPix=0, verbose=False):
                 print(line)
     f.close()
     mags = np.array(mags)
-    # convert radii (in degrees) to pixels
-    radii = np.array(radii) * 3600 / geom.radToArcsec(wcs.getPixelScale())
+    # convert radii (in degrees) to arcsecpixels
+    radii = np.array(radii) * 3600
+    # and, if requested, to pixels
+    if radInPix:
+        radii /= geom.radToArcsec(wcs.getPixelScale())
     return pix_centers, mags, radii
 
+def countInAnnulus(src, brightCen, radiiPix, x_name="base_SdssCentroid_x",
+                   y_name="base_SdssCentroid_y"):
+    radMaxPix = radiiPix[-1]
+    # only consider detections within a square of width 2 outer radii
+    withinSquare = ((src[x_name] >= brightCen[0]-radMaxPix) &
+                    (src[x_name] < brightCen[0]+radMaxPix) &
+                    (src[y_name] >= brightCen[1]-radMaxPix) &
+                    (src[y_name] < brightCen[1]+radMaxPix))
+    insideCents = np.array([obj.getCentroid() for obj in src[withinSquare]])
+    # compute distance to bright object for all candidates
+    dist = np.sqrt(np.sum((insideCents - brightCen)**2, axis=1))
+    counts = []
+    areas = []
+    for radIn,radOut in zip(radiiPix,radiiPix[1:]):
+        # count those within annulus
+        inAnnulus = (dist >= radIn) & (dist < radOut)
+        counts += [np.sum(inAnnulus)]
+        areas += [np.pi *(radOut**2 - radIn**2)]
+    return counts, areas
+
 def countsBeyondMask(src, nbAnnuli, annSizePix, brightCenters, brightRadii, verbose=False):
-    """Compute detected source counts around all bright stars in the chosen tract.
-    `src` should be read from `deepCoadd_meas`"""
+    """Compute detected source counts around bright star masks."""
     allCounts, allAreas = [], []
     for j,brightCen in enumerate(brightCenters):
         start = time.time()
-        counts = []
-        areas = []
         # compute annuli radii for this bright object
         brad = brightRadii[j]
         #radiiPix = np.arange(brad, brad + annSizePix*(nbAnnuli + 1), annSizePix
         radiiPix = np.array([brad + k*annSizePix for k in range(nbAnnuli+1)])
-        radMaxPix = radiiPix[-1]
-        # only consider detections within a square of width 2 outer radii
-        withinSquare = ((src["base_SdssCentroid_x"] >= brightCen[0]-radMaxPix) &
-                          (src["base_SdssCentroid_x"] < brightCen[0]+radMaxPix) &
-                          (src["base_SdssCentroid_y"] >= brightCen[1]-radMaxPix) &
-                          (src["base_SdssCentroid_y"] < brightCen[1]+radMaxPix))
-        insideCents = np.array([obj.getCentroid() for obj in src[withinSquare]])
-        # compute distance to bright object for all candidates
-        dist = np.sqrt(np.sum((insideCents - brightCen)**2, axis=1))
-        #for radIn,radOut in zip(radiiPix,radiiPix[1:]):
-        for k,(radIn,radOut) in enumerate(zip(radiiPix,radiiPix[1:])):
-            # count those within annulus
-            inAnnulus = (dist >= radIn) & (dist < radOut)
-            counts += [np.sum(inAnnulus)]
-            areas += [np.pi *(radOut**2 - radIn**2)]
+        counts, areas = countInAnnulus(src, brightCen, radiiPix)
         end = time.time()
         if not j%500 and verbose:
             print(' > Bright object {} out of {}; time elapsed for this object: {}s'.format(
@@ -96,12 +102,12 @@ def boxSelector(centers, radii, x0, y0, xWidth, yWidth, extraBuffer=0,
     If `from_center`, check that centers fall within box; if `False`, that
     circles of radii `radii` do."""
     if from_center:
-        buffers = np.zeros(radii.shape)
+        buffers = np.zeros(radii.shape) + extraBuffer
     else:
         buffers = radii + extraBuffer
-    inside = np.array([(cent[0] - buffer > x0) &
-                       (cent[0] + buffer < x0 + xWidth) &
-                       (cent[1] - buffer > y0) &
-                       (cent[1] + buffer < y0 + yWidth)
-                   for cent,buffer in zip(centers, buffers)])
+    inside = np.array([(cent[0] - buff > x0) &
+                       (cent[0] + buff < x0 + xWidth) &
+                       (cent[1] - buff > y0) &
+                       (cent[1] + buff < y0 + yWidth)
+                   for cent,buff in zip(centers, buffers)])
     return np.where(inside)[0]
